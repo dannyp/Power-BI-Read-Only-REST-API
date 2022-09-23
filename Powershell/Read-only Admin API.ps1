@@ -1,29 +1,27 @@
-### set variables
-$tenantId = "insert organization.onmicrosoft.com"
-$clientId = "inset client id"
-$clientSecret = "insert client secret"
+# ### set variables
+# $tenantId = "insert organization.onmicrosoft.com"
+# $clientId = "inset client id"
+# $clientSecret = "insert client secret"
 
+# Login-PowerBI
 # dependency with PowerBIPS module, please install first using install-module powerbips
-$authToken = Get-PBIAuthToken -clientId $clientId -clientSecret $clientSecret -tenantId $tenantId
-$folderPath = "D:\temp"
+# $authToken = Get-PBIAuthToken -clientId $clientId -clientSecret $clientSecret -tenantId $tenantId
+$folderPath = "C:\temp\pbi"
+$header = Get-PowerBIAccessToken
 
 
 
 ### STEP 1: Retrieve list with workspace Ids which have been modified since a given date (optionally). Without modifiedSince essentially you will get a full metadata snapshot.
 
 # get modifiedSince from locally stored file
-$parameter = "?modifiedSince=$(Get-Content $folderPath\modifiedSince.txt)"
-#$parameter = "" # uncomment this line when retrieving everything
+#$parameter = "?modifiedSince=$(Get-Content $folderPath\modifiedSince.txt)"
+$parameter = "" # uncomment this line when retrieving everything
 
 # log timestamp of above request. Store in file for re-use when this script runs again.
 $newModifiedSince = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffffffK") | Out-File $folderPath\modifiedSince.txt
 
 # Call /modified endpoint to retrieve workspaces
-$modifiedWorkspaces = Invoke-PBIRequest -authToken $authToken -resource ("admin/workspaces/modified" + $parameter) -method Get -scope Admin -contentType "application/json" -ignoreGroup
-
-
-
-
+$modifiedWorkspaces = Invoke-PowerBIRestMethod  -Url ("admin/workspaces/modified" + $parameter) -method Get  -contentType "application/json" | ConvertFrom-Json
 
 
 ### STEP 2: Retrieve details per batch of 100 workspaces. API is asynchronous, so request first, then retrieve later in a separate loop.
@@ -49,7 +47,7 @@ for ($i=0;$i -lt $batchCount;$i++) {
 	# we want lineage and datasource details
     $parameter = "?lineage=True&datasourceDetails=True&datasetSchema=true&datasetExpressions=true"
 	# Call /getInfo API
-    $workspaceInfoRequests += Invoke-PBIRequest -authToken $authToken -resource ("admin/workspaces/getInfo" + $parameter) -method Post -body $body -scope Admin -contentType "application/json" -ignoreGroup
+    $workspaceInfoRequests += Invoke-PowerBIRestMethod  -Url ("admin/workspaces/getInfo" + $parameter) -method Post -body $body -contentType "application/json" | ConvertFrom-Json
 
 	# wait a little bit, since the API has a limit, not thoroughly tested, but this prevented the occasionally thrown errors
     start-sleep -ms 200
@@ -70,12 +68,13 @@ foreach ($workspaceInfoRequest in $workspaceInfoRequests) {
     Write-Host "Getting batch $($count) with id $($workspaceInfoRequest.id)" -ForegroundColor White
 
     $parameter = "/" + $workspaceInfoRequest.id
-    #$status = Invoke-PBIRequest -authToken $authToken -resource ("admin/workspaces/scanStatus" + $parameter) -method Get -scope Admin -contentType "application/json" -ignoreGroup
+    #$status = Invoke-PBIRequest -authToken $authToken -resource ("admin/workspaces/scanStatus" + $parameter) -method Get  -contentType "application/json" -ignoreGroup
 
 	# Check if the request is processed already, otherwise wait 5 seconds and check again
     while ($status.status -ne "Succeeded") {
 
-        $status = Invoke-PBIRequest -authToken $authToken -resource ("admin/workspaces/scanStatus" + $parameter) -method Get -scope Admin -contentType "application/json" -ignoreGroup
+        Write-Host ("admin/workspaces/scanStatus" + $parameter)
+        $status = Invoke-PowerBIRestMethod   -Url ("admin/workspaces/scanStatus" + $parameter) -method Get  -contentType "application/json"  | ConvertFrom-Json
         start-sleep 5
         Write-Host "Wait 5 seconds.." -ForegroundColor Yellow
         
@@ -83,7 +82,7 @@ foreach ($workspaceInfoRequest in $workspaceInfoRequests) {
     }
 
 	# when ready, retrieve data and add to array
-    $workspaceInfo += Invoke-PBIRequest -authToken $authToken -resource ("admin/workspaces/scanResult" + $parameter) -method Get -scope Admin -contentType "application/json" -ignoreGroup
+    $workspaceInfo += Invoke-PowerBIRestMethod   -Url ("admin/workspaces/scanResult" + $parameter) -method Get  -contentType "application/json"  | ConvertFrom-Json
     Write-Host "Batch received" -ForegroundColor Green
 
     $count++
